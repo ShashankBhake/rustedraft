@@ -1,0 +1,11 @@
+[package]
+name = "raft_consensus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8.5"
+reqwest = { version = "0.12.7", features = ["json"] }
+serde = { version = "1.0.208", features = ["derive"] }
+tokio = { version = "1.39.3", features = ["macros", "rt", "rt-multi-thread", "sync"] }
+warp = "0.3.7"
