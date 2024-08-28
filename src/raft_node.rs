@@ -28,7 +28,7 @@ impl RaftNode {
             log: Vec::new(),
             commit_length: 0,
             next_index: 0,
-            vm_state: vec![0; 4],
+            vm_state: vec![0; 5],
             peers,
         }
     }
@@ -70,6 +70,7 @@ pub struct AppendEntriesRequest {
     pub prev_log_term: u32,
     pub entry: Option<LogEntry>,
     pub leader_commit: usize,
+    pub leader_id: u32,
 }
 
 #[derive(Serialize, Deserialize)]

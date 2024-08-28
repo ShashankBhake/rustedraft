@@ -42,25 +42,34 @@ async fn append_entries(
 
     let current_term = state.lock().unwrap().current_term;
     let commit_length = state.lock().unwrap().commit_length;
-    if body.term < current_term {
+
+    let _ = timer_tx.send(0).await;
+
+    if let None = body.entry {
+        println!("Heartbeat Received from id: {:?}", body.leader_id);
         return Ok(reply::json(&AppendEntriesResponse {
             term: current_term,
             success: false,
-            commit: 0,
+            commit: commit_length,
         }));
-    } else {
-        state.lock().unwrap().role = Role::Follower;
     }
-
-    let _ = timer_tx.send(0).await;
     if let Some(entry) = body.entry {
+        if body.term < current_term {
+            return Ok(reply::json(&AppendEntriesResponse {
+                term: current_term,
+                success: false,
+                commit: commit_length,
+            }));
+        }
+        println!("Log entries: {:?}", entry);
+        println!("State before append: {:?}", state.lock().unwrap().vm_state);
+        // println!(
+        //     "Entry index: {} Log len: {} committed upto: {}",
+        //     body.entry_index,
+        //     node.log.len(),
+        //     commit_length
+        // );
         let mut node = state.lock().unwrap();
-        println!(
-            "Entry index: {} Log len: {} committed upto: {}",
-            body.entry_index,
-            node.log.len(),
-            commit_length
-        );
         let mut log_len = node.log.len();
         if body.entry_index > log_len {
             return Ok(reply::json(&AppendEntriesResponse {
@@ -68,21 +77,17 @@ async fn append_entries(
                 success: false,
                 commit: commit_length,
             }));
-        } else {
-            node.log.truncate(body.entry_index);
-            node.log.push(entry.clone());
-            node.commit_length = node.log.len();
-            log_len = node.log.len();
-            drop(node);
-            vm_execute(&entry.cmd, state.clone());
         }
-        println!("Updated Log Length: {}", log_len);
-    } else {
-        println!(
-            "Heartbeat Received, vm state: {:?}",
-            state.lock().unwrap().vm_state
-        );
-    };
+        node.log.truncate(body.entry_index);
+        node.log.push(entry.clone());
+        node.commit_length = node.log.len();
+        drop(node);
+        vm_execute(&entry.cmd, state.clone());
+        if state.lock().unwrap().role == Role::Candidate {
+            state.lock().unwrap().role = Role::Follower;
+        }
+        println!("State after append: {:?}", state.lock().unwrap().vm_state);
+    }
 
     Ok(reply::json(&AppendEntriesResponse {
         term: current_term,
@@ -112,7 +117,7 @@ fn vm_execute(body: &str, state: Arc<Mutex<RaftNode>>) -> bool {
         _ => return false,
     }
 
-    println!("VM State: {:?}", node.vm_state);
+    // println!("VM State: {:?}", node.vm_state);
     true
 }
 
@@ -127,6 +132,7 @@ async fn execute_command(
         current_term,
         peers,
         commit_length,
+        id,
         ..
     } = state.lock().unwrap().clone();
     let client = reqwest::Client::new();
@@ -146,6 +152,7 @@ async fn execute_command(
                 prev_log_term: 0,
                 entry: Some(log.last().unwrap().clone()),
                 leader_commit: commit_length,
+                leader_id: id,
             })
             .send()
             .await;
@@ -183,6 +190,7 @@ async fn catch_up(starting_at: usize, state: Arc<Mutex<RaftNode>>) {
         peers,
         commit_length,
         current_term,
+        id,
         ..
     } = state.lock().unwrap().clone();
     println!("Syncing from: {starting_at}");
@@ -196,6 +204,7 @@ async fn catch_up(starting_at: usize, state: Arc<Mutex<RaftNode>>) {
                     prev_log_term: 0,
                     entry: Some(log[i].clone()),
                     leader_commit: commit_length,
+                    leader_id: id,
                 })
                 .send()
                 .await;
@@ -279,7 +288,10 @@ async fn send_heartbeats(state: Arc<Mutex<RaftNode>>) {
     beat_interval.tick().await;
     let client = reqwest::Client::new();
     let RaftNode {
-        mut role, peers, ..
+        mut role,
+        peers,
+        id,
+        ..
     } = state.lock().unwrap().clone();
 
     while role == Role::Leader {
@@ -299,6 +311,7 @@ async fn send_heartbeats(state: Arc<Mutex<RaftNode>>) {
                     prev_log_term: log.last().unwrap_or(&LogEntry::default()).term,
                     entry: None,
                     leader_commit: commit_length,
+                    leader_id: id,
                 })
                 .send()
                 .await;
@@ -334,8 +347,6 @@ async fn main() {
 
     let state = Arc::new(Mutex::new(RaftNode::new(id, peers)));
 
-    //debug(state.clone());
-
     let st1 = Arc::clone(&state);
     let st2 = Arc::clone(&state);
     let st3 = Arc::clone(&state);
@@ -363,22 +374,5 @@ async fn main() {
 
     let server = warp::serve(routes).run(([127, 0, 0, 1], id as u16));
 
-    /*    tokio::spawn(async move {
-    loop {
-        time::sleep(Duration::from_secs(1)).await;
-        tx.send(0).await;
-        println!("Sent");
-    }
-    });*/
-
     tokio::join!(server, timer(rx, st3.clone()));
-}
-
-fn debug(state: Arc<Mutex<RaftNode>>) {
-    let mut node = state.lock().unwrap();
-    if node.id != 8001 {
-        return;
-    };
-    println!("set term to 3");
-    node.current_term = 3;
 }
