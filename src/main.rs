@@ -114,6 +114,13 @@ fn vm_execute(body: &str, state: Arc<Mutex<RaftNode>>) -> bool {
         "ADD" => node.vm_state[target_index] = node.vm_state[op1 as usize] + node.vm_state[op2],
         "SUB" => node.vm_state[target_index] = node.vm_state[op1 as usize] - node.vm_state[op2],
         "MUL" => node.vm_state[target_index] = node.vm_state[op1 as usize] * node.vm_state[op2],
+        "DIV" => {
+            if node.vm_state[op2] != 0 {
+                node.vm_state[target_index] = node.vm_state[op1 as usize] / node.vm_state[op2];
+            } else {
+                return false;
+            }
+        }
         _ => return false,
     }
 
